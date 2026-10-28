@@ -173,13 +173,31 @@ public final class TerminalSession extends TerminalOutput {
 
     }
 
-    /** Write data to the shell process. */
+    private final ByblackUnifiedInput mByblackUnifiedInput =
+        new ByblackUnifiedInput(mTerminalToProcessIOQueue);
+
+    /**
+     * Submit terminal input without blocking the Android UI thread.
+     *
+     * Large input must be handled by a background producer.
+     */
     @Override
     public void write(byte[] data, int offset, int count) {
-        if (mShellPid > 0) mTerminalToProcessIOQueue.write(data, offset, count);
+        ByblackUnifiedInput.Result result =
+            mByblackUnifiedInput.offer(data, offset, count);
+
+        if (result != ByblackUnifiedInput.Result.ACCEPTED) {
+            android.util.Log.w(
+                "ByblackANR", "Input rejected: " + result);
+        }
     }
 
-    /** Write the Unicode code point to the terminal encoded in UTF-8. */
+    public void writePasteAsync(String text, boolean bracketed) {
+        ByblackUnifiedInput.Result result = mByblackUnifiedInput.offerPaste(text, bracketed);
+        if (result != ByblackUnifiedInput.Result.ACCEPTED)
+            android.util.Log.w("ByblackANR", "Paste rejected: " + result);
+    }
+
     public void writeCodePoint(boolean prependEscape, int codePoint) {
         if (codePoint > 1114111 || (codePoint >= 0xD800 && codePoint <= 0xDFFF)) {
             // 1114111 (= 2**16 + 1024**2 - 1) is the highest code point, [0xD800,0xDFFF] is the surrogate range.
@@ -250,7 +268,7 @@ public final class TerminalSession extends TerminalOutput {
         }
 
         // Stop the reader and writer threads, and close the I/O streams
-        mTerminalToProcessIOQueue.close();
+        mByblackUnifiedInput.close();
         mProcessToTerminalIOQueue.close();
         JNI.close(mTerminalFileDescriptor);
     }
